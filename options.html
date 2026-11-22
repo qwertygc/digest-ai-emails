@@ -12,9 +12,8 @@
   legend { font-weight: 600; padding: 0 .4rem; }
   label { display: block; margin: .6rem 0 .2rem; font-weight: 600; }
   small { color: #777; display: block; margin-bottom: .3rem; }
-  input[type=text], input[type=password], input[type=number] {
+  input[type=text], input[type=password], input[type=number], select {
     width: 100%; box-sizing: border-box; padding: .35rem; }
-  input[type=range] { width: 100%; }
   .row { display: flex; align-items: center; gap: .5rem; margin: .5rem 0; }
   .row label { margin: 0; font-weight: 400; }
   button { padding: .5rem 1.2rem; font-size: .95rem; cursor: pointer; }
@@ -25,18 +24,31 @@
 <h1>Options de Digest IA</h1>
 
 <fieldset>
-  <legend>Mistral</legend>
-  <label for="apiKey">Clé API Mistral</label>
-  <small>À créer sur la console Mistral (console.mistral.ai). Conservée
-  uniquement dans le stockage local de Thunderbird, sur votre machine.</small>
+  <legend>Fournisseur LLM</legend>
+  <label for="provider">Fournisseur</label>
+  <small>Mistral, OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini),
+  ou n'importe quel service compatible OpenAI (OpenRouter, Groq, Ollama,
+  LM Studio, llama.cpp, vLLM…).</small>
+  <select id="provider" name="provider"></select>
+
+  <label for="baseUrl">Point d'accès (URL de base)</label>
+  <small>Pré-rempli selon le fournisseur, modifiable. Pour un service
+  compatible OpenAI, indiquez l'URL qui se termine avant
+  « /chat/completions » (ex. http://localhost:11434/v1 pour Ollama).
+  Laissez tel quel pour les fournisseurs connus.</small>
+  <input type="text" id="baseUrl" autocomplete="off">
+
+  <label for="apiKey">Clé API</label>
+  <small>Conservée uniquement dans le stockage local de Thunderbird,
+  sur votre machine.</small>
   <input type="password" id="apiKey" autocomplete="off">
+
   <label for="model">Modèle</label>
+  <small>Identifiant exact du modèle chez le fournisseur (ex.
+  mistral-small-latest, gpt-4o-mini, claude-sonnet-4-5,
+  gemini-2.0-flash).</small>
   <input type="text" id="model" list="models">
-  <datalist id="models">
-    <option value="mistral-small-latest"></option>
-    <option value="mistral-medium-latest"></option>
-    <option value="mistral-large-latest"></option>
-  </datalist>
+  <datalist id="models"></datalist>
 </fieldset>
 
 <fieldset>
@@ -60,7 +72,8 @@
   <label for="cacheDays">Durée de validité (jours, 0 = illimitée)</label>
   <small>Les regroupements et synthèses déjà payés sont réutilisés tant que
   les messages concernés sont inchangés : un second lancement identique ne
-  consomme aucun token.</small>
+  consomme aucun token. Changer de fournisseur ou de modèle vidait
+  naturellement la mémoire.</small>
   <input type="number" id="cacheDays" min="0" max="365" step="1">
 </fieldset>
 

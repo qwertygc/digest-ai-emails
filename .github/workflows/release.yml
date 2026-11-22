@@ -1,0 +1,57 @@
+name: build-xpi
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extraire la version du manifeste
+        id: ver
+        run: |
+          echo "version=$(python3 -c "import json;print(json.load(open('manifest.json'))['version'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Construire le .xpi
+        run: |
+          mkdir -p dist
+          zip -q -r -X "dist/digest-ai-tb-v${{ steps.ver.outputs.version }}.xpi" \
+            manifest.json digest-lib.js background.js \
+            popup.html popup.js options.html options.js \
+            digest.html digest.js
+          unzip -l "dist/digest-ai-tb-v${{ steps.ver.outputs.version }}.xpi"
+
+      # Chaque commit sur main met à jour la release roulante « latest »
+      - name: Release « latest »
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Build v${{ steps.ver.outputs.version }} (latest)"
+          body: |
+            Build automatique du commit ${{ github.sha }}.
+
+            Installation : Thunderbird → Outils → Modules et thèmes → ⚙ →
+            Installer un module depuis un fichier → sélectionner le .xpi.
+          files: dist/*.xpi
+          make_latest: true
+
+      # Un tag vX.Y.Z crée une release versionnée définitive
+      - name: Release versionnée (tag vX.Y.Z)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Digest IA v${{ steps.ver.outputs.version }}"
+          body: |
+            Release v${{ steps.ver.outputs.version }} du projet digest-ai-emails.
+
+            Installation : Thunderbird → Outils → Modules et thèmes → ⚙ →
+            Installer un module depuis un fichier → sélectionner le .xpi.
+          files: dist/*.xpi

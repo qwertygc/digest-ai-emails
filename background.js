@@ -1,6 +1,6 @@
 /*
  * background.js — orchestration : réception du dossier depuis le popup,
- * lecture des messages (getFull), appels Mistral (clustering puis
+ * lecture des messages (getFull), appels au LLM choisi (clustering puis
  * synthèses en parallèle), mémoire des traitements dans storage.local,
  * rendu HTML stocké puis ouvert dans un onglet Thunderbird.
  *
@@ -13,9 +13,44 @@
 var RUN_STATE = { running: false };
 var CONCURRENCY = 4;
 
+/* ------------------------- fournisseurs LLM ------------------------- */
+
+/* Chaque fournisseur définit un point d'accès et un modèle par défaut.
+ * « custom » désigne n'importe quel service compatible OpenAI
+ * (OpenRouter, Groq, llama.cpp, LM Studio, vLLM, Ollama, etc.). */
+var PROVIDERS = {
+  mistral: {
+    label: 'Mistral AI',
+    baseUrl: 'https://api.mistral.ai/v1',
+    model: 'mistral-small-latest'
+  },
+  openai: {
+    label: 'OpenAI (ChatGPT)',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini'
+  },
+  anthropic: {
+    label: 'Anthropic (Claude)',
+    baseUrl: 'https://api.anthropic.com',
+    model: 'claude-sonnet-4-5'
+  },
+  gemini: {
+    label: 'Google (Gemini)',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    model: 'gemini-2.0-flash'
+  },
+  custom: {
+    label: 'Autre (compatible OpenAI)',
+    baseUrl: '',
+    model: ''
+  }
+};
+
 /* ------------------------- réglages ------------------------- */
 
 var DEFAULT_SETTINGS = {
+  provider: 'mistral',
+  baseUrl: '',
   apiKey: '',
   model: 'mistral-small-latest',
   limit: 40,
@@ -29,6 +64,13 @@ var DEFAULT_SETTINGS = {
 async function getSettings() {
   var stored = await browser.storage.local.get('settings');
   var s = Object.assign({}, DEFAULT_SETTINGS, stored.settings || {});
+  if (!PROVIDERS[s.provider]) s.provider = 'mistral';
+  /* Point d'accès : valeur de l'utilisateur si renseignée, sinon celui
+   * du fournisseur. Obligatoire pour « custom ». */
+  s.baseUrl = String(s.baseUrl || '').trim() ||
+    (PROVIDERS[s.provider].baseUrl || '');
+  s.baseUrl = s.baseUrl.replace(/\/+$/, '');
+  s.model = String(s.model || '').trim() || PROVIDERS[s.provider].model;
   s.watchTopics = String(s.watch || '')
     .split(',')
     .map(function (t) { return t.trim(); })
@@ -68,76 +110,214 @@ function clusterFingerprint(messages, settings) {
     '|c=' + EXTRACT_CHARS_CLUSTER);
 }
 
-/* Empreinte d'un groupe : intitulé + identifiants + modèle + extrait long. */
+/* Empreinte d'un groupe : intitulé + identifiants + fournisseur + modèle +
+ * extrait long. Changer de LLM invalide la mémoire, c'est voulu. */
 function groupFingerprint(theme, messages, settings) {
   var ids = messages.map(function (m) { return m.id; }).sort();
   return shortId(theme.toLowerCase() + '|' + ids.join('-') +
-    '|m=' + settings.model + '|e=' + EXTRACT_CHARS);
+    '|p=' + settings.provider + '|m=' + settings.model + '|e=' + EXTRACT_CHARS);
 }
 
-/* ------------------------- Mistral ------------------------- */
+/* ------------------------- appels LLM (agnostiques) ------------------------- */
 
 var TOKEN_USAGE = { calls: 0, prompt: 0, completion: 0 };
 
-async function mistralChat(messages, jsonMode, apiKey, model) {
+function sleep(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+/* Découpe les tours {role, content} en (system, tours sans system). */
+function splitTurns(turns) {
+  var system = '';
+  var rest = [];
+  turns.forEach(function (t) {
+    if (t.role === 'system') {
+      system += t.content + '\n';
+    } else {
+      rest.push(t);
+    }
+  });
+  return { system: system.trim(), turns: rest };
+}
+
+/* Construit la requête et l'analyseur de réponse propres au fournisseur.
+ * Renvoie des fonctions pures : testables hors Thunderbird. */
+function llmAdapter(provider, settings, turns, jsonMode) {
+  var t = splitTurns(turns);
+  var temp = jsonMode ? 0.1 : 0.4;
+  if (provider === 'anthropic') {
+    return {
+      url: settings.baseUrl + '/v1/messages',
+      headers: {
+        'x-api-key': settings.apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      payload: {
+        model: settings.model,
+        max_tokens: 4096,
+        system: t.system,
+        messages: t.turns,
+        temperature: temp
+      },
+      parse: function (data) {
+        var blocks = data.content || [];
+        var text = blocks.map(function (b) { return b.text || ''; }).join('');
+        return {
+          content: text.trim(),
+          truncated: data.stop_reason === 'max_tokens',
+          prompt: (data.usage && data.usage.input_tokens) || 0,
+          completion: (data.usage && data.usage.output_tokens) || 0
+        };
+      }
+    };
+  }
+  if (provider === 'gemini') {
+    var genConfig = { temperature: temp };
+    if (jsonMode) genConfig.responseMimeType = 'application/json';
+    return {
+      url: settings.baseUrl + '/models/' +
+        encodeURIComponent(settings.model) + ':generateContent',
+      headers: {
+        'x-goog-api-key': settings.apiKey,
+        'Content-Type': 'application/json'
+      },
+      payload: {
+        systemInstruction: t.system ? { parts: [{ text: t.system }] } : undefined,
+        contents: t.turns.map(function (m) {
+          return {
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }]
+          };
+        }),
+        generationConfig: genConfig
+      },
+      parse: function (data) {
+        var cand = (data.candidates || [])[0] || {};
+        var parts = (cand.content && cand.content.parts) || [];
+        var text = parts.map(function (p) { return p.text || ''; }).join('');
+        var u = data.usageMetadata || {};
+        return {
+          content: text.trim(),
+          truncated: cand.finishReason === 'MAX_TOKENS',
+          prompt: u.promptTokenCount || 0,
+          completion: u.candidatesTokenCount || 0
+        };
+      }
+    };
+  }
+  /* mistral, openai, custom : API chat/completions. */
   var payload = {
-    model: model,
-    messages: messages,
-    temperature: jsonMode ? 0.1 : 0.4
+    model: settings.model,
+    messages: turns,
+    temperature: temp
   };
-  if (jsonMode) payload.response_format = { type: 'json_object' };
+  if (jsonMode && provider !== 'custom') {
+    payload.response_format = { type: 'json_object' };
+  }
+  var spec = {
+    url: settings.baseUrl + '/chat/completions',
+    headers: {
+      'Authorization': 'Bearer ' + settings.apiKey,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    payload: payload,
+    parse: function (data) {
+      var choice = (data.choices || [])[0] || {};
+      var text = (choice.message && choice.message.content) || '';
+      var u = data.usage || {};
+      return {
+        content: String(text).trim(),
+        truncated: choice.finish_reason === 'length',
+        prompt: u.prompt_tokens || 0,
+        completion: u.completion_tokens || 0
+      };
+    }
+  };
+  /* Le mode JSON strict n'est pas supporté partout : si le serveur le
+   * refuse (HTTP 400), on retente une fois sans response_format ; les
+   * prompts exigent de toute façon une réponse JSON. */
+  spec.jsonStrict = !!(jsonMode && provider !== 'custom');
+  return spec;
+}
+
+/* Appel générique : réessais avec temporisation sur 429/5xx/réseau,
+ * repli sans response_format si nécessaire. Compte les tokens. */
+async function callLlm(turns, jsonMode, settings) {
+  var provider = settings.provider;
+  var label = PROVIDERS[provider].label;
+  if (!settings.apiKey) throw new Error('Clé API absente (Options).');
+  if (!settings.baseUrl) {
+    throw new Error('Point d\'accès (URL de base) manquant pour « ' + label + ' ».');
+  }
 
   var maxAttempts = 3;
   for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    var spec = llmAdapter(provider, settings, turns, jsonMode);
     var response;
     try {
-      response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      response = await fetch(spec.url, {
         method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + apiKey,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(payload)
+        headers: spec.headers,
+        body: JSON.stringify(spec.payload)
       });
     } catch (err) {
-      if (attempt < maxAttempts) {
-        await sleep(3000 * attempt);
-        continue;
-      }
-      throw new Error('Réseau indisponible vers api.mistral.ai : ' + err);
+      if (attempt < maxAttempts) { await sleep(3000 * attempt); continue; }
+      throw new Error('Réseau indisponible vers ' + settings.baseUrl + ' : ' + err);
+    }
+    if (response.status === 400 && spec.jsonStrict) {
+      /* Ce serveur refuse response_format : une tentative sans, les
+       * prompts exigent de toute façon une réponse JSON. */
+      try {
+        var bare = await fetch(spec.url, {
+          method: 'POST',
+          headers: spec.headers,
+          body: JSON.stringify({
+            model: spec.payload.model,
+            messages: spec.payload.messages,
+            temperature: spec.payload.temperature
+          })
+        });
+        if (bare.ok) {
+          var bareData = await bare.json();
+          return llmResult(spec, bareData);
+        }
+        response = bare;
+      } catch (err2) { /* on retombe sur la logique ci-dessous */ }
     }
     if (response.status === 429 || response.status >= 500) {
-      if (attempt < maxAttempts) {
-        await sleep(5000 * attempt);
-        continue;
-      }
-      throw new Error('API Mistral : HTTP ' + response.status);
+      if (attempt < maxAttempts) { await sleep(5000 * attempt); continue; }
+      throw new Error(label + ' : HTTP ' + response.status);
     }
     if (!response.ok) {
       var body = await response.text();
-      throw new Error('API Mistral (HTTP ' + response.status + ') : ' +
+      throw new Error(label + ' (HTTP ' + response.status + ') : ' +
         body.slice(0, 300));
     }
-    var data = await response.json();
-    if (data.usage) {
-      TOKEN_USAGE.calls++;
-      TOKEN_USAGE.prompt += data.usage.prompt_tokens || 0;
-      TOKEN_USAGE.completion += data.usage.completion_tokens || 0;
-    }
-    if (data.choices && data.choices[0] &&
-        data.choices[0].finish_reason === 'length') {
-      progress('Avertissement : réponse Mistral tronquée (finish_reason=length).');
-    }
-    var content = (data.choices && data.choices[0] &&
-      data.choices[0].message && data.choices[0].message.content) || '';
-    return content.trim();
+    var data2 = await response.json();
+    return llmResult(spec, data2);
   }
-  throw new Error('API Mistral : nombre de tentatives épuisé.');
+  throw new Error(label + ' : nombre de tentatives épuisé.');
 }
 
-function sleep(ms) {
-  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+function llmResult(spec, data) {
+  var r = spec.parse(data);
+  if (data && r.prompt === 0 && r.completion === 0 && data.usage) {
+    /* formes exotiques éventuelles */
+    r.prompt = data.usage.prompt_tokens || r.prompt;
+    r.completion = data.usage.completion_tokens || r.completion;
+  }
+  if (r.prompt || r.completion) {
+    TOKEN_USAGE.calls++;
+    TOKEN_USAGE.prompt += r.prompt;
+    TOKEN_USAGE.completion += r.completion;
+  }
+  if (r.truncated) {
+    progress('Avertissement : réponse du LLM tronquée (limite de tokens).');
+  }
+  return r.content;
 }
 
 /* ------------------------- étapes ------------------------- */
@@ -165,7 +345,7 @@ async function listHeaders(folder, limit, unreadOnly) {
 }
 
 /* Corps des messages en parallèle (petit pool pour rester courtois).
- * Renvoie des messages {header, message} ; les échecs sont écartés. */
+ * Les messages illisibles sont écartés silencieusement. */
 async function loadMessages(headers, from, to) {
   var slice = headers.slice(from, to);
   var out = [];
@@ -192,10 +372,10 @@ async function loadMessages(headers, from, to) {
  * si des identifiants manquent. Repli « Divers » si réponse illisible. */
 async function clusterMessages(messages, settings) {
   var prompts = clusterPrompt(messages, settings.watchTopics);
-  var raw = await mistralChat([
+  var raw = await callLlm([
     { role: 'system', content: prompts.system },
     { role: 'user', content: prompts.user }
-  ], true, settings.apiKey, settings.model);
+  ], true, settings);
 
   var groups = parseGroups(raw, messages.map(function (m) { return m.id; }));
   var missing = missingIds(groups, messages);
@@ -204,12 +384,12 @@ async function clusterMessages(messages, settings) {
     progress('Relance du regroupement (identifiants oubliés : ' +
       missing.length + ')…');
     var fix = clusterFixPrompt(missing, messages);
-    raw = await mistralChat([
+    raw = await callLlm([
       { role: 'system', content: prompts.system },
       { role: 'user', content: prompts.user },
       { role: 'assistant', content: raw },
       { role: 'user', content: fix }
-    ], true, settings.apiKey, settings.model);
+    ], true, settings);
     groups = parseGroups(raw, messages.map(function (m) { return m.id; })) || groups;
     missing = missingIds(groups, messages);
     if (missing.length) {
@@ -224,13 +404,12 @@ async function clusterMessages(messages, settings) {
 /* Synthèse pour une thématique : 'synthese' + ligne 'à retenir' par message. */
 async function summarizeGroup(theme, messages, settings) {
   var prompts = summaryPrompt(theme, messages);
-  var raw = await mistralChat([
+  var raw = await callLlm([
     { role: 'system', content: prompts.system },
     { role: 'user', content: prompts.user }
-  ], true, settings.apiKey, settings.model);
+  ], true, settings);
   var result = parseSummary(raw);
   if (!result) {
-    /* Synthèse textuelle de repli : la réponse brute comme paragraphe. */
     progress('Avertissement : synthèse illisible pour « ' + theme +
       '», texte brut conservé.');
     result = { synthese: raw, points: {} };
@@ -289,8 +468,9 @@ async function runDigest(folder) {
   TOKEN_USAGE = { calls: 0, prompt: 0, completion: 0 };
   try {
     var settings = await getSettings();
+    var label = PROVIDERS[settings.provider].label;
     if (!settings.apiKey) {
-      throw new Error('Aucune clé API Mistral configurée (Options de l\'extension).');
+      throw new Error('Aucune clé API configurée (Options de l\'extension).');
     }
 
     var folderName = folder.name || folder.path || 'dossier';
@@ -323,7 +503,7 @@ async function runDigest(folder) {
       progress('Regroupement repris de la mémoire (' + groups.length +
         ' thématiques, 0 token).');
     } else {
-      progress('Regroupement thématique via Mistral…');
+      progress('Regroupement thématique via ' + label + '…');
       groups = await clusterMessages(messages, settings);
       progress(groups.length + ' thématique(s) détectée(s).');
       cache.cluster[cKey] = { ts: Date.now(), value: groups };
@@ -400,7 +580,7 @@ async function runDigest(folder) {
     await browser.tabs.create({ url: 'digest.html' });
 
     var tokenMsg = TOKEN_USAGE.calls
-      ? 'Consommation Mistral : ' + TOKEN_USAGE.calls + ' appel(s), ' +
+      ? label + ' : ' + TOKEN_USAGE.calls + ' appel(s), ' +
         num(TOKEN_USAGE.prompt + TOKEN_USAGE.completion) + ' tokens au total.'
       : 'Aucun token consommé (mémoire).';
     if (reused) {
@@ -438,6 +618,4 @@ browser.runtime.onConnect.addListener(function (port) {
   });
 });
 
-/* Commande depuis la page digest : relancer sur le dernier dossier ? Simple
- * garde-fou : le popup reste la porte d'entrée (il connaît les dossiers). */
 log('extension chargée, prête à recevoir un dossier.');

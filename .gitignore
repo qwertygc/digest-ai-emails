@@ -1,6 +1,7 @@
 # artefacts de construction
 *.xpi
 *.zip
+dist/
 
 # système
 .DS_Store
