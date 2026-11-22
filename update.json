@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "digest-ai-emails@qwertygc": {
+      "updates": [
+        {
+          "version": "2.1.1",
+          "update_link": "https://github.com/qwertygc/digest-ai-emails/releases/download/latest/digest-ai-tb.xpi"
+        }
+      ]
+    }
+  }
+}

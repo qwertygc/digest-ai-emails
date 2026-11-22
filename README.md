@@ -2,7 +2,15 @@
 
 Extension Thunderbird qui transforme les messages d'un dossier en une **revue de veille HTML** : les messages sont regroupés par thématique et synthétisés par le **LLM de votre choix**, dans un onglet Thunderbird. Aucun export de messages, aucun service tiers : tout se passe sur votre machine.
 
-![Version](https://img.shields.io/badge/version-2.1.0-blue) ![Thunderbird](https://img.shields.io/badge/Thunderbird-%E2%89%A5115-orange) ![Langue](https://img.shields.io/badge/langue-Fran%C3%A7ais-blueviolet)
+![Version](https://img.shields.io/badge/version-2.1.1-blue) ![Thunderbird](https://img.shields.io/badge/Thunderbird-%E2%89%A5115-orange) ![Langue](https://img.shields.io/badge/langue-Fran%C3%A7ais-blueviolet)
+
+## Mise à jour automatique
+
+Le manifeste de l'extension déclare un flux de mise à jour (`update_url`) pointant vers [`update.json`](update.json) sur la branche `main`. Thunderbird interroge ce flux environ une fois par jour ; si une version plus récente y figure, elle est installée automatiquement depuis l'asset de la [release latest](../../releases). Le workflow CI ajoute chaque version publiée dans `update.json` sans intervention humaine (commit `[skip ci]`).
+
+- Forcer la vérification : **Outils → Modules et thèmes → ⚙ → Rechercher des mises à jour**
+- **Le dépôt doit être public** : Thunderbird télécharge le flux et l'archive sans authentification, ce qu'un dépôt privé refuse. Une fois le dépôt public (Réglages → Danger Zone → Change visibility), le mécanisme fonctionne tel quel
+- Autre option : publier sur [addons.thunderbird.net](https://addons.thunderbird.net) (mise à jour automatique et signature officielle pour tout le monde)
 
 ## LLM-agnostique
 
@@ -63,13 +71,14 @@ Dans les options de l'extension (Outils → Modules et thèmes → Digest IA →
 
 ## Architecture
 
-- `manifest.json` — Manifest V2, permissions : `messagesRead`, `accountsRead`, `folders`, `storage`, `tabs` ; accès réseau largé sur `https://*/*` et `http://localhost/*` (nécessaire pour les fournisseurs au choix, y compris serveurs locaux)
+- `manifest.json` — Manifest V2, permissions : `messagesRead`, `accountsRead`, `folders`, `storage`, `tabs` ; accès réseau largé sur `https://*/*` et `http://localhost/*` (nécessaire pour les fournisseurs au choix, y compris serveurs locaux) ; flux de mise à jour Thunderbird (`update_url`)
+- `update.json` — Flux de mise à jour Thunderbird (versions et liens d'installation), maintenu automatiquement par le CI
 - `digest-lib.js` — Extraction (multi-parties, HTML → texte, entités), collecte et classement des URL (détourage des redirections Google, retrait du pistage, fréquences), prompts (regroupement, correction, synthèse), analyse des réponses JSON (avec repli), rendu HTML autonome (CSS embarqué, aucun CDN)
 - `background.js` — Orchestration : pagination des en-têtes (`messages.list` / `continueList`), chargement des corps en pool (`getFull`), couche LLM à adaptateurs (chat/completions, Anthropic Messages, Gemini generateContent), réessais, cache `storage.local`, suivi des tokens
 - `popup.{html,js}` — Choix du dossier (dossier courant via l'API `mailTabs` ou arborescence complète) et lancement
 - `options.{html,js}` — Réglages persistés dans `storage.local`, pré-remplissage selon le fournisseur
 - `digest.{html,js}` — Affichage du dernier digest (iframe `srcdoc`, liens ouverts dans le navigateur système)
-- `.github/workflows/release.yml` — À chaque commit sur `main`, construction du `.xpi` et mise à jour de la release **latest** ; chaque tag `vX.Y.Z` publie une release versionnée
+- `.github/workflows/release.yml` — À chaque commit sur `main` : construction du `.xpi`, mise à jour de la release **latest** et du flux `update.json` ; chaque tag `vX.Y.Z` publie une release versionnée
 
 ## Développement
 
@@ -89,4 +98,4 @@ Distribué sous [Licence publique de l'Union européenne v. 1.2 (EUPL-1.2)](LICE
 
 ---
 
-*English summary: a Thunderbird MailExtension that turns the messages of any folder into a themed HTML digest using the LLM of your choice (Mistral, OpenAI, Anthropic, Gemini or any OpenAI-compatible endpoint, including local ones). Fully local, multi-link extraction with frequency ranking for Google Alerts folders, token-cache reuse, automated .xpi releases via CI and a French UI.*
+*English summary: a Thunderbird MailExtension that turns the messages of any folder into a themed HTML digest using the LLM of your choice (Mistral, OpenAI, Anthropic, Gemini or any OpenAI-compatible endpoint, including local ones). Fully local, multi-link extraction with frequency ranking for Google Alerts folders, token-cache reuse, self-hosted automatic updates via update.json, automated .xpi releases via CI and a French UI.*

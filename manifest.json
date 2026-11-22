@@ -1,12 +1,13 @@
 {
   "manifest_version": 2,
   "name": "Digest IA",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Revue de veille IA des messages d'un dossier Thunderbird, via le LLM de votre choix (Mistral, Claude, Gemini, ChatGPT ou tout service compatible OpenAI).",
   "browser_specific_settings": {
     "gecko": {
       "id": "digest-ai-emails@qwertygc",
-      "strict_min_version": "115.0"
+      "strict_min_version": "115.0",
+      "update_url": "https://raw.githubusercontent.com/qwertygc/digest-ai-emails/main/update.json"
     }
   },
   "permissions": ["messagesRead", "accountsRead", "folders", "storage", "tabs"],
