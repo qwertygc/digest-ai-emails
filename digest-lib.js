@@ -8,6 +8,9 @@
 
 var EXTRACT_CHARS = 900;
 var EXTRACT_CHARS_CLUSTER = 400;
+var MAX_URLS_PER_MESSAGE = 15;  // classement des liens d'un message
+var MAX_FREQ_LINKS = 15;        // section « liens les plus fréquents »
+var MIN_FREQ_SECTION = 2;       // en dessous, la section n'apparaît pas
 
 /* ------------------------- texte & URLs ------------------------- */
 
@@ -91,6 +94,69 @@ function extractUrls(text) {
   return out;
 }
 
+/* Détourage des redirections Google (Alertes Google / Scholar) :
+ * https://www.google.com/url?q=<cible>… rend l'adresse réelle. */
+function unwrapRedirect(url) {
+  var u = String(url || '');
+  var re = /^https?:\/\/[^\/]*\.?google\.[a-z.]{2,10}\/url\?/i;
+  if (!re.test(u)) return u;
+  var params = u.split('?')[1] || '';
+  var kv = {};
+  params.split('&').forEach(function (p) {
+    var i = p.indexOf('=');
+    if (i > 0) {
+      try {
+        kv[p.slice(0, i)] = decodeURIComponent(p.slice(i + 1));
+      } catch (e) {
+        kv[p.slice(0, i)] = p.slice(i + 1);
+      }
+    }
+  });
+  var target = kv.q || kv.url || kv.u || '';
+  return target.indexOf('http') === 0 ? target : u;
+}
+
+/* Paramètres de pistage retirés pour que deux occurrences du même
+ * article (alertes successives, variantes d'URL) fusionnent. */
+var TRACKING_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign',
+  'utm_term', 'utm_content', 'fbclid', 'gclid', 'mc_cid', 'mc_eid',
+  'ref_src', 'igshid', 'spm', 'replytocom'];
+
+function normalizeUrl(url) {
+  var u = unwrapRedirect(url).split('#')[0];
+  var idx = u.indexOf('?');
+  if (idx < 0) return u;
+  var base = u.slice(0, idx);
+  var kept = u.slice(idx + 1).split('&').filter(function (p) {
+    return TRACKING_PARAMS.indexOf(p.split('=')[0].toLowerCase()) < 0;
+  });
+  return kept.length ? base + '?' + kept.join('&') : base;
+}
+
+function hostOf(url) {
+  var m = String(url || '').match(/^https?:\/\/([^\/?#]+)/i);
+  return m ? m[1].replace(/^www\./, '') : '';
+}
+
+/* Classe les URL brutes d'un message : normalisées, comptées, les plus
+ * fréquentes d'abord, puis par ordre d'apparition. */
+function rankUrls(rawUrls, max) {
+  var order = [];
+  var counts = {};
+  (rawUrls || []).forEach(function (raw) {
+    var u = normalizeUrl(raw);
+    if (!u || !isUsefulUrl(u)) return;
+    if (counts[u] == null) { counts[u] = { url: u, count: 0 }; order.push(u); }
+    counts[u].count++;
+  });
+  var list = order.map(function (u) { return counts[u]; });
+  list.forEach(function (e, i) { e.rank = i; });
+  list.sort(function (a, b) {
+    return b.count - a.count || a.rank - b.rank;
+  });
+  return typeof max === 'number' ? list.slice(0, max) : list;
+}
+
 function truncateChars(text, maxChars) {
   if (text.length <= maxChars) return text;
   var cut = text.slice(0, maxChars);
@@ -144,20 +210,17 @@ function extractMessage(header, full) {
   var htmlText = normalizeText(htmls.filter(Boolean).map(htmlToText).join('\n\n'));
   var text = htmlText.length > plain.length ? htmlText : plain;
 
-  /* URL candidates : celles du texte d'abord, puis les href du HTML */
-  var urls = extractUrls(text);
-  var allHrefs = [];
+  /* URL candidates : celles du texte d'abord, puis les href du HTML.
+   * Toutes conservées (un message d'Alerte Google contient plusieurs
+   * résultats), détourées et normalisées, classées par fréquence. */
+  var urlCandidates = extractUrls(text);
   for (var i = 0; i < htmls.length; i++) {
     var partHrefs = hrefsOf(htmls[i]);
     for (var j = 0; j < partHrefs.length; j++) {
-      if (allHrefs.indexOf(partHrefs[j]) < 0) allHrefs.push(partHrefs[j]);
+      if (isUsefulUrl(partHrefs[j])) urlCandidates.push(partHrefs[j]);
     }
   }
-  for (var k = 0; k < allHrefs.length; k++) {
-    if (isUsefulUrl(allHrefs[k]) && urls.indexOf(allHrefs[k]) < 0) {
-      urls.push(allHrefs[k]);
-    }
-  }
+  var urls = rankUrls(urlCandidates, MAX_URLS_PER_MESSAGE);
 
   var author = String(header.author || '').trim();
   var m = author.match(/<([^>]+)>/);
@@ -182,7 +245,8 @@ function extractMessage(header, full) {
     dateMs: dateMs,
     dateStr: dateStr,
     readingTime: words ? Math.max(1, Math.round(words / 200)) : 0,
-    url: urls.length ? urls[0] : '',
+    url: urls.length ? urls[0].url : '',
+    urls: urls,
     extract: text ? truncateChars(text, EXTRACT_CHARS) : '',
     extractShort: text ? truncateChars(text, EXTRACT_CHARS_CLUSTER) : '',
     hasText: !!text
@@ -407,6 +471,8 @@ var DIGEST_CSS = [
   'details.theme a:hover{text-decoration:underline}',
   '.point{display:block;color:#777;font-style:italic;font-size:.92rem}',
   '.src{color:#999;font-size:.82rem}',
+  '.links{display:block;margin:.25rem 0 0;font-size:.78rem}',
+  '.links a{margin-right:.55rem}',
   '.pin{color:#0b6bcc}',
   '.nolink{color:#202020}',
   'footer{border-top:1px solid #ddd;margin-top:2rem;padding:.8rem 0;',
@@ -415,6 +481,38 @@ var DIGEST_CSS = [
 
 function num(n) {
   return new Intl.NumberFormat('fr-FR').format(n);
+}
+
+/* Fréquence des liens à l'échelle du digest : combien de messages citent
+ * chaque URL normalisée (Alertes Google successives : le même article
+ * revient, les paramètres de pistage doivent fusionner). */
+function topLinks(digest, max, minMsgs) {
+  var order = [];
+  var byUrl = {};
+  digest.forEach(function (group) {
+    (group.messages || []).forEach(function (m) {
+      var list = m.urls && m.urls.length ? m.urls :
+        (m.url ? [{ url: m.url }] : []);
+      list.forEach(function (u) {
+        var e = byUrl[u.url];
+        if (!e) {
+          e = byUrl[u.url] = {
+            url: u.url, msgs: 0, hits: 0,
+            sample: m.subject, host: hostOf(u.url)
+          };
+          order.push(u.url);
+        }
+        e.msgs++;
+        e.hits += (u.count || 1);
+      });
+    });
+  });
+  return order.map(function (u) { return byUrl[u]; })
+    .filter(function (e) { return e.msgs >= (minMsgs || 2); })
+    .sort(function (a, b) {
+      return b.msgs - a.msgs || b.hits - a.hits;
+    })
+    .slice(0, max || MAX_FREQ_LINKS);
 }
 
 function renderDigestHtml(digest, meta, opts) {
@@ -430,7 +528,28 @@ function renderDigestHtml(digest, meta, opts) {
   var metaLine = escHtml(meta.total + ' message' + (meta.total > 1 ? 's' : '') +
     ' · ' + digest.length + ' thématique' + (digest.length > 1 ? 's' : '') +
     (allTime ? ' · ' + allTime + ' de lecture' : '') +
-    ' — Mistral (' + meta.model + '), généré le ' + today + ' à ' + clock);
+    ' — LLM (' + meta.model + '), généré le ' + today + ' à ' + clock);
+
+  /* Section « liens les plus fréquents » : uniquement si assez de liens
+   * reviennent dans plusieurs messages (typique des alertes). */
+  var frequentlyUsed = topLinks(digest, MAX_FREQ_LINKS, 2);
+  var freqHtml = '';
+  if (frequentlyUsed.length >= MIN_FREQ_SECTION) {
+    var freqItems = frequentlyUsed.map(function (e) {
+      return '        <li><a href="' + escHtml(e.url) + '">' +
+        escHtml(e.sample) + '</a> <span class="src">' +
+        escHtml(e.host) + ' · dans ' + e.msgs +
+        (e.msgs > 1 ? ' messages' : ' message') + '</span></li>';
+    }).join('\n');
+    freqHtml = '      <details class="theme freq" open>\n' +
+      '        <summary>Liens les plus fréquents <span class="count">top ' +
+      frequentlyUsed.length + '</span></summary>\n' +
+      '        <p class="summary">Adresses citées dans plusieurs messages ' +
+      'du dossier, classées par fréquence (redirections Google ' +
+      'détourées, pistage retiré).</p>\n' +
+      '        <ul>\n' + freqItems + '\n        </ul>\n' +
+      '      </details>\n';
+  }
 
   var sections = digest.map(function (group, n) {
     var isWatch = watchRank(group.theme, watchKey) < watchKey.length;
@@ -451,6 +570,17 @@ function renderDigestHtml(digest, meta, opts) {
       }
       var point = group.points[m.id];
       if (point) item += '<span class="point">' + escHtml(point) + '</span>';
+      /* Liens supplémentaires du message (Alertes Google : un message,
+       * plusieurs résultats) : domaines cliquables, plafonnés. */
+      var more = (m.urls || []).slice(1, 7);
+      if ((m.urls || []).length > 1) {
+        item += ' <span class="links">' + more.map(function (u) {
+          return '<a href="' + escHtml(u.url) + '">' +
+            escHtml(hostOf(u.url) || u.url) + '</a>';
+        }).join(' ') +
+          (m.urls.length > 7 ? ' +' + (m.urls.length - 7) : '') +
+          '</span>';
+      }
       return '        <li>' + item + '</li>';
     }).join('\n');
     return '      <details class="theme"' + (opts.sectionsOpen ? ' open' : '') + '>\n' +
@@ -471,8 +601,8 @@ function renderDigestHtml(digest, meta, opts) {
     '  <p class="kicker">' + title + '</p>\n' +
     '  <h1>' + escHtml(meta.title || 'Revue de veille') + '</h1>\n' +
     '  <p class="meta">' + metaLine + '</p>\n' +
-    '</header>\n<main>\n' + sections + '\n</main>\n' +
-    '<footer>Digest produit par l\'extension « Digest IA » (Thunderbird + Mistral).' +
+    '</header>\n<main>\n' + freqHtml + sections + '\n</main>\n' +
+    '<footer>Digest produit par l\'extension « Digest IA » (Thunderbird, LLM au choix).' +
     ' Les résumés sont générés par IA : vérifiez les messages sources avant de citer.\n' +
     '</footer>\n</body>\n</html>\n';
 }

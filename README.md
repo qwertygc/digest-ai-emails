@@ -2,7 +2,7 @@
 
 Extension Thunderbird qui transforme les messages d'un dossier en une **revue de veille HTML** : les messages sont regroupés par thématique et synthétisés par le **LLM de votre choix**, dans un onglet Thunderbird. Aucun export de messages, aucun service tiers : tout se passe sur votre machine.
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue) ![Thunderbird](https://img.shields.io/badge/Thunderbird-%E2%89%A5115-orange) ![Langue](https://img.shields.io/badge/langue-Fran%C3%A7ais-blueviolet)
+![Version](https://img.shields.io/badge/version-2.1.0-blue) ![Thunderbird](https://img.shields.io/badge/Thunderbird-%E2%89%A5115-orange) ![Langue](https://img.shields.io/badge/langue-Fran%C3%A7ais-blueviolet)
 
 ## LLM-agnostique
 
@@ -22,6 +22,7 @@ La ligne « Autre » couvre tout service exposant une API compatible OpenAI : Op
 
 - **Un clic** : le dossier affiché dans l'onglet de messagerie actif est proposé en tête du popup (« Dossier courant »), sinon tous les comptes et sous-dossiers sont listés
 - **Regroupement thématique** (1 appel LLM), puis **synthèse par thème** (appels parallèles) avec une ligne « à retenir » par message
+- **Multi-liens et liens fréquents** : toutes les URL utiles d'un message sont conservées (pas seulement la première — un message d'Alerte Google contient plusieurs résultats), les redirections `google.com/url?q=…` sont détourées, les paramètres de pistage (`utm_*`, `fbclid`…) retirés ; la section **« Liens les plus fréquents »** ouvre le digest avec les adresses citées dans plusieurs messages, classées par fréquence — pensée pour les dossiers d'**Alertes Google et Google Scholar**
 - **Thématiques de veille** : les thèmes suivis (ex. *Nucléaire, Photographie*) remontent en tête du digest, marqués ★
 - **Mémoire des traitements** : un second lancement identique ne consomme aucun token (empreintes des messages, TTL configurable)
 - **Consommation affichée** : nombre d'appels et de tokens en fin de run
@@ -58,12 +59,12 @@ Dans les options de l'extension (Outils → Modules et thèmes → Digest IA →
 2. Cliquez sur le bouton **Digest IA** de la barre d'outils
 3. Le popup propose « Dossier courant : … » ; cliquez sur **Générer le digest**
 4. Suivez la progression (lecture, regroupement, synthèses), même si vous fermez le popup : le traitement continue en arrière-plan
-5. La revue s'ouvre dans un onglet Thunderbird : sections par thème, synthèses, sources et liens
+5. La revue s'ouvre dans un onglet Thunderbird : liens fréquents en tête, sections par thème, synthèses, sources et liens
 
 ## Architecture
 
 - `manifest.json` — Manifest V2, permissions : `messagesRead`, `accountsRead`, `folders`, `storage`, `tabs` ; accès réseau largé sur `https://*/*` et `http://localhost/*` (nécessaire pour les fournisseurs au choix, y compris serveurs locaux)
-- `digest-lib.js` — Extraction (multi-parties, HTML → texte, entités, liens utiles), prompts (regroupement, correction, synthèse), analyse des réponses JSON (avec repli), rendu HTML autonome (CSS embarqué, aucun CDN)
+- `digest-lib.js` — Extraction (multi-parties, HTML → texte, entités), collecte et classement des URL (détourage des redirections Google, retrait du pistage, fréquences), prompts (regroupement, correction, synthèse), analyse des réponses JSON (avec repli), rendu HTML autonome (CSS embarqué, aucun CDN)
 - `background.js` — Orchestration : pagination des en-têtes (`messages.list` / `continueList`), chargement des corps en pool (`getFull`), couche LLM à adaptateurs (chat/completions, Anthropic Messages, Gemini generateContent), réessais, cache `storage.local`, suivi des tokens
 - `popup.{html,js}` — Choix du dossier (dossier courant via l'API `mailTabs` ou arborescence complète) et lancement
 - `options.{html,js}` — Réglages persistés dans `storage.local`, pré-remplissage selon le fournisseur
@@ -88,4 +89,4 @@ Distribué sous [Licence publique de l'Union européenne v. 1.2 (EUPL-1.2)](LICE
 
 ---
 
-*English summary: a Thunderbird MailExtension that turns the messages of any folder into a themed HTML digest using the LLM of your choice (Mistral, OpenAI, Anthropic, Gemini or any OpenAI-compatible endpoint, including local ones). Fully local, with token-cache reuse, automated .xpi releases via CI and a French UI.*
+*English summary: a Thunderbird MailExtension that turns the messages of any folder into a themed HTML digest using the LLM of your choice (Mistral, OpenAI, Anthropic, Gemini or any OpenAI-compatible endpoint, including local ones). Fully local, multi-link extraction with frequency ranking for Google Alerts folders, token-cache reuse, automated .xpi releases via CI and a French UI.*
