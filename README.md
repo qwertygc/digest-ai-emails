@@ -32,7 +32,7 @@ La ligne « Autre » couvre tout service exposant une API compatible OpenAI : Op
 
 ## Installation
 
-Téléchargez le dernier `digest-ai-tb-v*.xpi` sur la page **[Releases](../../releases)** (chaque commit construit une archive à jour), puis dans Thunderbird : **Outils → Modules et thèmes → ⚙ → Installer un module depuis un fichier** → sélectionnez le `.xpi`.
+Téléchargez le dernier `digest-ai-tb.xpi` sur la page **[Releases](../../releases)** (chaque commit construit une archive à jour), puis dans Thunderbird : **Outils → Modules et thèmes → ⚙ → Installer un module depuis un fichier** → sélectionnez le `.xpi`.
 
 Thunderbird ≥ 115 requis (128 recommandé). Mise à jour : même manipulation, Thunderbird remplace la version existante et conserve les réglages.
 

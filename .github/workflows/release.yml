@@ -22,11 +22,11 @@ jobs:
       - name: Construire le .xpi
         run: |
           mkdir -p dist
-          zip -q -r -X "dist/digest-ai-tb-v${{ steps.ver.outputs.version }}.xpi" \
+          zip -q -r -X dist/digest-ai-tb.xpi \
             manifest.json digest-lib.js background.js \
             popup.html popup.js options.html options.js \
             digest.html digest.js
-          unzip -l "dist/digest-ai-tb-v${{ steps.ver.outputs.version }}.xpi"
+          unzip -l dist/digest-ai-tb.xpi
 
       # Chaque commit sur main met à jour la release roulante « latest »
       - name: Release « latest »
