@@ -1,0 +1,8 @@
+# artefacts de construction
+*.xpi
+*.zip
+
+# système
+.DS_Store
+Thumbs.db
+desktop.ini

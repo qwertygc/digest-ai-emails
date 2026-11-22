@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Options — Digest IA</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto;
+         padding: 0 1rem; line-height: 1.5; color: #202020; }
+  h1 { font-size: 1.3rem; }
+  fieldset { border: 1px solid #ccc; border-radius: 8px;
+             margin-bottom: 1.2rem; padding: .8rem 1rem; }
+  legend { font-weight: 600; padding: 0 .4rem; }
+  label { display: block; margin: .6rem 0 .2rem; font-weight: 600; }
+  small { color: #777; display: block; margin-bottom: .3rem; }
+  input[type=text], input[type=password], input[type=number] {
+    width: 100%; box-sizing: border-box; padding: .35rem; }
+  input[type=range] { width: 100%; }
+  .row { display: flex; align-items: center; gap: .5rem; margin: .5rem 0; }
+  .row label { margin: 0; font-weight: 400; }
+  button { padding: .5rem 1.2rem; font-size: .95rem; cursor: pointer; }
+  #status { display: inline-block; margin-left: .8rem; color: #080; }
+</style>
+</head>
+<body>
+<h1>Options de Digest IA</h1>
+
+<fieldset>
+  <legend>Mistral</legend>
+  <label for="apiKey">Clé API Mistral</label>
+  <small>À créer sur la console Mistral (console.mistral.ai). Conservée
+  uniquement dans le stockage local de Thunderbird, sur votre machine.</small>
+  <input type="password" id="apiKey" autocomplete="off">
+  <label for="model">Modèle</label>
+  <input type="text" id="model" list="models">
+  <datalist id="models">
+    <option value="mistral-small-latest"></option>
+    <option value="mistral-medium-latest"></option>
+    <option value="mistral-large-latest"></option>
+  </datalist>
+</fieldset>
+
+<fieldset>
+  <legend>Revue</legend>
+  <label for="title">Titre de la revue</label>
+  <input type="text" id="title">
+  <label for="limit">Nombre maximum de messages traités</label>
+  <input type="number" id="limit" min="1" max="200" step="5">
+  <label for="watch">Thématiques de veille (séparées par des virgules)</label>
+  <small>Ex. : Nucléaire, Photographie. Les sections correspondantes
+  remontent en tête du digest (★) dès qu'un message s'y rattache.</small>
+  <input type="text" id="watch">
+  <div class="row"><input type="checkbox" id="unreadOnly">
+    <label for="unreadOnly">Messages non lus seulement</label></div>
+  <div class="row"><input type="checkbox" id="sectionsOpen">
+    <label for="sectionsOpen">Sections dépliées par défaut</label></div>
+</fieldset>
+
+<fieldset>
+  <legend>Mémoire des traitements</legend>
+  <label for="cacheDays">Durée de validité (jours, 0 = illimitée)</label>
+  <small>Les regroupements et synthèses déjà payés sont réutilisés tant que
+  les messages concernés sont inchangés : un second lancement identique ne
+  consomme aucun token.</small>
+  <input type="number" id="cacheDays" min="0" max="365" step="1">
+</fieldset>
+
+<button id="save">Enregistrer</button>
+<span id="status"></span>
+
+<script src="options.js"></script>
+</body>
+</html>

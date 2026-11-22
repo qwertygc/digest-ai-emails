@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Digest IA</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { font-family: system-ui, sans-serif; display: flex;
+         flex-direction: column; }
+  header { padding: .5rem 1rem; background: #f2f2f2;
+           border-bottom: 1px solid #ddd; font-size: .85rem; color: #555;
+           display: flex; justify-content: space-between; align-items: center; }
+  header b { color: #202020; }
+  iframe { flex: 1; border: 0; width: 100%; }
+  #empty { flex: 1; display: flex; align-items: center;
+           justify-content: center; color: #888; }
+  button { cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <b>Digest IA</b>
+  <span id="hint"></span>
+  <button id="refresh" title="Recharger le dernier digest">Recharger</button>
+</header>
+<div id="empty">Aucun digest pour l'instant : lancez-le depuis le bouton
+Digest IA de la barre d'outils.</div>
+<iframe id="view" style="display:none"></iframe>
+<script src="digest.js"></script>
+</body>
+</html>

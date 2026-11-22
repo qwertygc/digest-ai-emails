@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: system-ui, sans-serif; width: 320px; margin: 0;
+         padding: .8rem; font-size: .85rem; }
+  h1 { font-size: 1rem; margin: 0 0 .3rem; }
+  p.hint { color: #666; margin: 0 0 .6rem; }
+  select { width: 100%; margin-bottom: .5rem; box-sizing: border-box; }
+  label.row { display: flex; align-items: center; gap: .4rem;
+              margin-bottom: .6rem; cursor: pointer; }
+  button { width: 100%; padding: .5rem; font-size: .9rem; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #log { margin-top: .6rem; max-height: 140px; overflow-y: auto;
+         font-size: .75rem; color: #444; white-space: pre-wrap;
+         border-top: 1px solid #ddd; padding-top: .4rem; }
+  .error { color: #b00; }
+  .ok { color: #080; }
+</style>
+</head>
+<body>
+<h1>Digest IA</h1>
+<p class="hint">Regroupe les messages d'un dossier par thématique via Mistral,
+puis ouvre la revue dans un onglet.</p>
+<select id="folder"></select>
+<label class="row"><input type="checkbox" id="unreadOnly">
+  Messages non lus seulement</label>
+<button id="run">Générer le digest</button>
+<div id="log"></div>
+<script src="popup.js"></script>
+</body>
+</html>
